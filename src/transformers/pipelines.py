@@ -814,6 +814,8 @@ class TextGenerationPipeline(Pipeline):
         """
         text_inputs = self._args_parser(*args)
 
+        output_scores = generate_kwargs.get("output_scores", None)
+
         results = []
         for prompt_text in text_inputs:
             # Manage correct placement of the tensors
@@ -857,12 +859,19 @@ class TextGenerationPipeline(Pipeline):
 
                 output_sequences = self.model.generate(input_ids=input_ids, **generate_kwargs)  # BS x SL
 
+            if output_scores:
+                output_sequences, scores = output_sequences
+
             result = []
-            for generated_sequence in output_sequences:
+            for i in range(len(output_sequences)):
+                generated_sequence = output_sequences[i]
+
                 if self.framework == "pt" and generated_sequence is not None:
                     generated_sequence = generated_sequence.cpu()
                 generated_sequence = generated_sequence.numpy().tolist()
                 record = {}
+                if output_scores:
+                    record["generated_score"] = scores[i]
                 if return_tensors:
                     record["generated_token_ids"] = generated_sequence
                 if return_text:
@@ -1922,13 +1931,20 @@ class SummarizationPipeline(Pipeline):
                     )
                 )
 
+            output_scores = generate_kwargs.get("output_scores", None)
             summaries = self.model.generate(
                 inputs["input_ids"], attention_mask=inputs["attention_mask"], **generate_kwargs,
             )
 
+            if output_scores:
+                summaries, scores = summaries
+
             results = []
-            for summary in summaries:
+            for i in range(len(summaries)):
+                summary = summaries[i]
                 record = {}
+                if output_scores:
+                    record["summary_score"] = scores[i]
                 if return_tensors:
                     record["summary_token_ids"] = summary
                 if return_text:
@@ -2032,9 +2048,18 @@ class TranslationPipeline(Pipeline):
             translations = self.model.generate(
                 inputs["input_ids"], attention_mask=inputs["attention_mask"], **generate_kwargs,
             )
+
+            output_scores = generate_kwargs.get("output_scores", None)
+            if output_scores:
+                translations, scores = translations
+
             results = []
-            for translation in translations:
+            for i in range(len(translations)):
+                translation = translations[i]
+
                 record = {}
+                if output_scores:
+                    record["translation_score"] = scores[i]
                 if return_tensors:
                     record["translation_token_ids"] = translation
                 if return_text:
@@ -2271,6 +2296,10 @@ class ConversationalPipeline(Pipeline):
             generated_responses = self.model.generate(
                 inputs["input_ids"], attention_mask=inputs["attention_mask"], **generate_kwargs,
             )
+
+            output_scores = generate_kwargs.get("output_scores", None)
+            if output_scores:
+                generated_responses, _ = generated_responses
 
             cleaned_history = self._clean_padding_history(generated_responses)
             output = []

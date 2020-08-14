@@ -328,6 +328,21 @@ class MonoColumnInputTestCase(unittest.TestCase):
                 nlp, VALID_INPUTS, mandatory_keys, invalid_inputs=invalid_inputs, **SUMMARIZATION_KWARGS
             )
 
+    @require_torch
+    def test_torch_summarization_with_scores(self):
+        invalid_inputs = [4, "<mask>"]
+        mandatory_keys = ["summary_text"]
+        for model in SUMMARIZATION_FINETUNED_MODELS:
+            nlp = pipeline(task="summarization", model=model, tokenizer=model)
+            self._test_mono_column_pipeline(
+                nlp,
+                VALID_INPUTS,
+                mandatory_keys,
+                invalid_inputs=invalid_inputs,
+                output_scores=True,
+                **SUMMARIZATION_KWARGS,
+            )
+
     @slow
     @require_torch
     def test_integration_torch_summarization(self):
@@ -372,6 +387,12 @@ class MonoColumnInputTestCase(unittest.TestCase):
         for model_name in TEXT_GENERATION_FINETUNED_MODELS:
             nlp = pipeline(task="text-generation", model=model_name, tokenizer=model_name, framework="pt")
             self._test_mono_column_pipeline(nlp, VALID_INPUTS, {})
+
+    @require_torch
+    def test_torch_text_generation_with_scores(self):
+        for model_name in TEXT_GENERATION_FINETUNED_MODELS:
+            nlp = pipeline(task="text-generation", model=model_name, tokenizer=model_name, framework="pt")
+            self._test_mono_column_pipeline(nlp, VALID_INPUTS, {}, output_scores=True)
 
     @require_tf
     def test_tf_text_generation(self):
@@ -574,7 +595,7 @@ class ZeroShotClassificationPipelineTests(unittest.TestCase):
 
 
 class DialoguePipelineTests(unittest.TestCase):
-    def _test_conversation_pipeline(self, nlp):
+    def _test_conversation_pipeline(self, nlp, **kwargs):
         valid_inputs = [Conversation("Hi there!"), [Conversation("Hi there!"), Conversation("How are you?")]]
         invalid_inputs = ["Hi there!", Conversation()]
         self.assertIsNotNone(nlp)
@@ -582,7 +603,7 @@ class DialoguePipelineTests(unittest.TestCase):
         mono_result = nlp(valid_inputs[0])
         self.assertIsInstance(mono_result, Conversation)
 
-        multi_result = nlp(valid_inputs[1])
+        multi_result = nlp(valid_inputs[1], **kwargs)
         self.assertIsInstance(multi_result, list)
         self.assertIsInstance(multi_result[0], Conversation)
         # Inactive conversations passed to the pipeline raise a ValueError
@@ -597,6 +618,12 @@ class DialoguePipelineTests(unittest.TestCase):
         for model_name in DIALOGUE_FINETUNED_MODELS:
             nlp = pipeline(task="conversational", model=model_name, tokenizer=model_name)
             self._test_conversation_pipeline(nlp)
+
+    @require_torch
+    def test_torch_conversation_with_scores(self):
+        for model_name in DIALOGUE_FINETUNED_MODELS:
+            nlp = pipeline(task="conversational", model=model_name, tokenizer=model_name)
+            self._test_conversation_pipeline(nlp, output_scores=True)
 
     @require_tf
     def test_tf_conversation(self):

@@ -221,6 +221,8 @@ class TestMarian_en_ROMANCE(MarianIntegrationTest):
         "Es dos años más viejo que yo.",
     ]
 
+    expected_scores = [[-13.15670108795166], [0.0], [0.0]]
+
     @slow
     def test_batch_generation_en_ROMANCE_multi(self):
         self._assert_generated_batch_equal_expected()
@@ -234,8 +236,18 @@ class TestMarian_en_ROMANCE(MarianIntegrationTest):
     def test_pipeline(self):
         device = 0 if torch_device == "cuda" else -1
         pipeline = TranslationPipeline(self.model, self.tokenizer, framework="pt", device=device)
-        output = pipeline(self.src_text)
+        output = pipeline(self.src_text, output_scores=None)
         self.assertEqual(self.expected_text, [x["translation_text"] for x in output])
+
+    def test_pipeline_with_scores(self):
+        device = 0 if torch_device == "cuda" else -1
+        pipeline = TranslationPipeline(self.model, self.tokenizer, framework="pt", device=device)
+        output = pipeline(self.src_text, output_scores=True)
+        self.assertEqual(self.expected_text, [x["translation_text"] for x in output])
+        self.assertEqual(len(self.expected_scores), len(output))
+        for expected_score, x in zip(self.expected_scores, output):
+            score = x["translation_score"].cpu().detach().item()
+            self.assertAlmostEqual(expected_score[0], score)
 
 
 @require_torch

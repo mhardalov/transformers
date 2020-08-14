@@ -132,6 +132,7 @@ class GenerationMixin:
         attention_mask: Optional[torch.LongTensor] = None,
         decoder_start_token_id: Optional[int] = None,
         use_cache: Optional[bool] = None,
+        output_scores: Optional[bool] = None,
         **model_specific_kwargs
     ) -> torch.LongTensor:
         r"""
@@ -203,14 +204,24 @@ class GenerationMixin:
             use_cache: (:obj:`bool`, `optional`, defaults to :obj:`True`):
                 Whether or not the model should use the past last key/values attentions (if applicable to the model) to
                 speed up decoding.
+            output_scores: (`optinal`) bool
+                If `output_scores` is True, the scores from the generation steps are returned. The scores for the generated
+                sequence for each example.
+                See `scores` under returned tensors for more detail.
             model_specific_kwargs:
                 Additional model specific kwargs will be forwarded to the :obj:`forward` function of the model.
 
         Return:
+            :obj:`tuple(torch.Tensor)`, or `torch.LongTensor` comprising various elements depending on the inputs:
 
             :obj:`torch.LongTensor` of shape :obj:`(batch_size * num_return_sequences, sequence_length)`:
             The generated sequences. The second dimension (sequence_length) is either equal to :obj:`max_length` or
             shorter if all batches finished early due to the :obj:`eos_token_id`.
+
+            scores (:obj:`tuple(torch.FloatTensor)`  of shape :obj:`(batch_size, num_return_sequences)`, `optional`,
+                returned when ``output_scores=True`` is passed.
+
+                Log-probabilities for each generated seuqence based on the greedy, or beam search's scores.
 
         Examples::
 
@@ -467,6 +478,7 @@ class GenerationMixin:
                 encoder_outputs=encoder_outputs,
                 attention_mask=attention_mask,
                 use_cache=use_cache,
+                output_scores=output_scores,
                 model_specific_kwargs=model_specific_kwargs,
             )
         else:
@@ -488,6 +500,7 @@ class GenerationMixin:
                 encoder_outputs=encoder_outputs,
                 attention_mask=attention_mask,
                 use_cache=use_cache,
+                output_scores=output_scores,
                 model_specific_kwargs=model_specific_kwargs,
             )
 
@@ -512,6 +525,7 @@ class GenerationMixin:
         encoder_outputs,
         attention_mask,
         use_cache,
+        output_scores,
         model_specific_kwargs,
     ):
         """ Generate sequences for each example without beam search (num_beams == 1).
@@ -522,6 +536,7 @@ class GenerationMixin:
         sent_lengths = input_ids.new(batch_size).fill_(max_length)
 
         past = (encoder_outputs, None) if encoder_outputs is not None else None
+        greedy_scores = None
 
         while cur_len < max_length:
             model_inputs = self.prepare_inputs_for_generation(
@@ -531,8 +546,9 @@ class GenerationMixin:
             outputs = self(**model_inputs)
             next_token_logits = outputs[0][:, -1, :]
 
+            scores = F.log_softmax(next_token_logits, dim=-1)
             scores = self.postprocess_next_token_scores(
-                scores=next_token_logits,
+                scores=scores,
                 input_ids=input_ids,
                 no_repeat_ngram_size=no_repeat_ngram_size,
                 bad_words_ids=bad_words_ids,
@@ -561,6 +577,9 @@ class GenerationMixin:
             else:
                 # Greedy decoding
                 next_token = torch.argmax(next_token_logits, dim=-1)
+
+            scores = scores.gather(1, next_token.view(-1, 1))
+            greedy_scores = scores if greedy_scores is None else greedy_scores + scores
 
             # update generations and finished sentences
             if eos_token_id is not None:
@@ -591,7 +610,8 @@ class GenerationMixin:
                     [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
                 )
 
-        return input_ids
+        outputs = (input_ids, greedy_scores) if output_scores else input_ids
+        return outputs
 
     def _generate_beam_search(
         self,
@@ -617,6 +637,7 @@ class GenerationMixin:
         encoder_outputs,
         attention_mask,
         use_cache,
+        output_scores,
         model_specific_kwargs,
     ):
         """ Generate sequences for each example with beam search.
@@ -849,7 +870,9 @@ class GenerationMixin:
             assert (len(hypo) == max_length for hypo in best)
             decoded = torch.stack(best).type(torch.long).to(next(self.parameters()).device)
 
-        return decoded
+        beam_scores = beam_scores.view(batch_size, num_beams)[:, :num_return_sequences]
+        outputs = (decoded, beam_scores) if output_scores else decoded
+        return outputs
 
     @staticmethod
     def _reorder_cache(past: Tuple, beam_idx: Tensor) -> Tuple[Tensor]:
